@@ -7,10 +7,13 @@ import logService from "./log.service";
 
 type DigimonFilters = {
   levels?: DigimonLevel[];
+  name?: string;
 };
 
 type GetDigimonsVariables = {
   filters?: DigimonFilters;
+  take: number;
+  offset: number;
 };
 
 const DIGIMON_FILE_PATH = "digimon.json";
@@ -219,13 +222,29 @@ const getAllDigimonData = async (): Promise<Digimon[]> => {
 
 // PUBLIC
 
-const getDigimons = async ({ filters }: GetDigimonsVariables) => {
+const getDigimons = async ({ filters, take, offset }: GetDigimonsVariables) => {
   const digimonData = await getAllDigimonData();
-  if (!filters?.levels || filters.levels.length === 0) return digimonData;
+  let filteredDigimonData = digimonData;
 
-  return digimonData.filter((digimon) =>
-    filters.levels!.some((level) => digimon.levels.includes(level))
-  );
+  if (filters?.levels && filters.levels.length > 0) {
+    filteredDigimonData = filteredDigimonData.filter((digimon) =>
+      filters.levels!.some((level) => digimon.levels.includes(level))
+    );
+  }
+
+  if (filters?.name) {
+    const normalizeName = (name: string) =>
+      name.toLowerCase().replace(/[^a-z0-9]/g, "");
+
+    filteredDigimonData = filteredDigimonData.filter((digimon) =>
+      normalizeName(digimon.name).includes(normalizeName(filters.name!))
+    );
+  }
+
+  return {
+    digimons: filteredDigimonData.slice(offset, offset + take),
+    total: filteredDigimonData.length,
+  };
 };
 
 const digimonService = {
