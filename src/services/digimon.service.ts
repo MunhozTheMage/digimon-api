@@ -1,9 +1,12 @@
+import { stat } from "fs/promises";
 import type { Digimon } from "../data-types/digimon.data";
 import DigimonLevel from "../enums/digimon-level.enum";
 import { allDigimonLevels } from "../enums/digimon-level.enum";
+import { toSha256 } from "../helper/encoding.helper";
 import htmlService, { type HtmlElement } from "./html.service";
 import httpService from "./http.service";
 import logService from "./log.service";
+import fs from "fs/promises";
 
 type DigimonFilters = {
   levels?: DigimonLevel[];
@@ -17,6 +20,7 @@ type GetDigimonsVariables = {
 };
 
 const DIGIMON_FILE_PATH = "digimon.json";
+const DIGIMON_IMAGES_FOLDER = "digimon-images";
 
 const WIKIMON_BASE_URL = "https://wikimon.net";
 const WIKIMON_DIGIMON_IMAGE_LIST_URL = `${WIKIMON_BASE_URL}/Visual_List_of_Digimon`;
@@ -220,6 +224,62 @@ const getAllDigimonData = async (): Promise<Digimon[]> => {
   return newDigimonData;
 };
 
+const createDigimonImagesFolder = async () => {
+  logService.info("Creating digimon images folder");
+  await fs.mkdir(DIGIMON_IMAGES_FOLDER);
+};
+
+const getDigimonImageFromFolder = async (
+  digimonName: string,
+  filename: string
+) => {
+  try {
+    const imageFolderStats = await stat(DIGIMON_IMAGES_FOLDER);
+    if (!imageFolderStats.isDirectory()) throw new Error();
+  } catch {
+    createDigimonImagesFolder();
+    return;
+  }
+
+  const imageFile = Bun.file(`${DIGIMON_IMAGES_FOLDER}/${filename}`);
+  if (!(await imageFile.exists())) return;
+
+  logService.info(`${digimonName} image found in folder`);
+  return imageFile;
+};
+
+const generateDigimonImage = async (digimonName: string, filename: string) => {
+  logService.info(`${digimonName} image not found in folder`);
+
+  const digimons = await getAllDigimonData();
+  const digimon = digimons.find((digimon) => digimon.name === digimonName);
+
+  if (!digimon) {
+    throw new Error(
+      `Unable to generate digimon image for ${digimonName}, not found in digimon data.`
+    );
+  }
+
+  const imageUrl = WIKIMON_BASE_URL + digimon.imageUrl;
+  logService.info(`Fetching ${digimonName} image from ${imageUrl}`);
+  const image = await httpService.fetchImage(imageUrl);
+  logService.info(`${digimonName} image fetched`);
+
+  await Bun.write(
+    `${DIGIMON_IMAGES_FOLDER}/${filename}`,
+    new Uint8Array(image)
+  );
+  logService.info(`${digimonName} image saved to folder`);
+  return Bun.file(`${DIGIMON_IMAGES_FOLDER}/${filename}`);
+};
+
+const replaceDigimonImageUrl = (digimons: Digimon[]) => {
+  return digimons.map((digimon) => ({
+    ...digimon,
+    imageUrl: `/digimons/${encodeURIComponent(digimon.name)}/image`,
+  }));
+};
+
 // PUBLIC
 
 const getDigimons = async ({ filters, take, offset }: GetDigimonsVariables) => {
@@ -242,13 +302,26 @@ const getDigimons = async ({ filters, take, offset }: GetDigimonsVariables) => {
   }
 
   return {
-    digimons: filteredDigimonData.slice(offset, offset + take),
+    digimons: replaceDigimonImageUrl(filteredDigimonData).slice(
+      offset,
+      offset + take
+    ),
     total: filteredDigimonData.length,
   };
 };
 
+const getImage = async (digimonName: string) => {
+  const filename = `${await toSha256(digimonName)}.png`;
+
+  const imageFile = await getDigimonImageFromFolder(digimonName, filename);
+  if (imageFile) return imageFile;
+
+  return generateDigimonImage(digimonName, filename);
+};
+
 const digimonService = {
   getDigimons,
+  getImage,
 };
 
 export default digimonService;

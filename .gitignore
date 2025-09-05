@@ -6,6 +6,7 @@ out
 dist
 *.tgz
 digimon.json
+digimon-images
 
 # code coverage
 coverage
